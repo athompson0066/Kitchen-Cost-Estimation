@@ -12,7 +12,17 @@ export default function App() {
   const [isAgencyPopupOpen, setIsAgencyPopupOpen] = useState(false);
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-900 font-sans text-slate-900 dark:text-slate-100 selection:bg-orange-200">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-900 font-sans text-slate-900 dark:text-slate-100 selection:bg-orange-200 relative">
+      {/* Hero Background Image */}
+      <div className="absolute top-0 left-0 w-full h-[80vh] z-0 overflow-hidden">
+        <img 
+          src="https://tomhandyman.ca/images/resource/service-18.jpg" 
+          alt="Kitchen Remodel" 
+          className="w-full h-full object-cover"
+        />
+        <div className="absolute inset-0 bg-slate-900/80 dark:bg-slate-900/90 mix-blend-multiply"></div>
+        <div className="absolute inset-0 bg-gradient-to-b from-transparent via-slate-50/80 to-slate-50 dark:via-slate-900/80 dark:to-slate-900"></div>
+      </div>
       
       {/* Landing Page Content */}
       <div className="pt-24 pb-32 px-6 lg:px-8 max-w-6xl mx-auto relative z-10 font-sans">
@@ -23,7 +33,7 @@ export default function App() {
             <div className="bg-[#e67e22] text-white p-2 rounded-xl">
               <Calculator className="w-6 h-6" />
             </div>
-            <span className="text-xl font-bold tracking-tight text-slate-900 dark:text-white">
+            <span className="text-xl font-bold tracking-tight text-white drop-shadow-md">
               Aiolos<span className="text-[#e67e22]">Media</span>
             </span>
           </div>
@@ -31,13 +41,13 @@ export default function App() {
 
         {/* Hero Section */}
         <div className="text-center max-w-4xl mx-auto mb-20">
-          <h1 className="text-5xl lg:text-7xl font-extrabold tracking-tight text-slate-900 dark:text-white mb-8 leading-[1.1]">
+          <h1 className="text-5xl lg:text-7xl font-extrabold tracking-tight text-white mb-8 leading-[1.1] drop-shadow-lg">
             Stop Chasing Tire-Kickers.<br/>
             <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#e67e22] to-orange-400">
               Start Closing Projects.
             </span>
           </h1>
-          <p className="text-xl text-slate-600 dark:text-slate-300 mb-10 max-w-2xl mx-auto">
+          <p className="text-xl text-slate-200 mb-10 max-w-2xl mx-auto drop-shadow-md">
             The 2026 AI-Powered Kitchen Estimator for Pro Remodelers.
           </p>
           <button 
