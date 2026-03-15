@@ -1,18 +1,18 @@
 import Papa from 'papaparse';
 
-export interface PriceItem {
+export interface KitchenPriceItem {
   Category: string;
   'Item Name': string;
   Unit: string;
   Quantity: string;
-  'Base Cost (CAD)': string;
+  'Base Material Cost (CAD)': string;
   'Labor Multiplier': string;
   'Regional Multiplier': string;
   Subtotal: string;
 }
 
-export const parseEstimatorCsv = async (): Promise<PriceItem[]> => {
-  const response = await fetch('https://docs.google.com/spreadsheets/d/1Sz5zwqDMQaPveiIuyvRSMNc6Fw-vqGSeHeYZXGd7ZDM/export?format=csv');
+export const parseKitchenCsv = async (): Promise<KitchenPriceItem[]> => {
+  const response = await fetch('https://docs.google.com/spreadsheets/d/1Wy_GsWacMXE4BLYVGcFg1pIJfLbzPRwTLLOX5dJyDUA/export?format=csv');
   const csvText = await response.text();
   
   return new Promise((resolve, reject) => {
@@ -20,7 +20,7 @@ export const parseEstimatorCsv = async (): Promise<PriceItem[]> => {
       header: true,
       skipEmptyLines: true,
       complete: (results) => {
-        resolve(results.data as PriceItem[]);
+        resolve(results.data as KitchenPriceItem[]);
       },
       error: (error: Error) => {
         reject(error);
