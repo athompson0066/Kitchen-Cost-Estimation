@@ -71,7 +71,7 @@ const SERVICE_OPTIONS = [
   'Kitchen Circuits & Panel Upgrade', 
   'Pot Light Install (Set of 6)', 
   'Subway Tile (Ceramic)', 
-  'Painting'
+  'Walls & Ceiling (Premium)'
 ];
 
 export default function App() {
