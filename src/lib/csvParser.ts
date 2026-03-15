@@ -12,7 +12,7 @@ export interface PriceItem {
 }
 
 export const parseEstimatorCsv = async (): Promise<PriceItem[]> => {
-  const response = await fetch('/Kitchen_Renovation_Estimator_2026.csv');
+  const response = await fetch('https://docs.google.com/spreadsheets/d/1Wy_GsWacMXE4BLYVGcFg1pIJfLbzPRwTLLOX5dJyDUA/export?format=csv');
   const csvText = await response.text();
   
   return new Promise((resolve, reject) => {
