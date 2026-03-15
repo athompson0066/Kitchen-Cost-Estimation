@@ -1,11 +1,11 @@
 import { GoogleGenAI } from "@google/genai";
 
-const apiKey = process.env.GEMINI_API_KEY;
-
 export const getGeminiModel = () => {
-  if (!apiKey) {
-    throw new Error("GEMINI_API_KEY is not set");
+  const apiKey = process.env.GEMINI_API_KEY;
+  
+  if (!apiKey || apiKey === "MY_GEMINI_API_KEY") {
+    throw new Error("Gemini API Key is missing or invalid. Please ensure it is configured in the AI Studio Secrets panel.");
   }
-  const ai = new GoogleGenAI({ apiKey });
-  return ai;
+  
+  return new GoogleGenAI({ apiKey });
 };

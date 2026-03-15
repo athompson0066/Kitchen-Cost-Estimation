@@ -133,9 +133,13 @@ Please generate the estimate now.
 
       setEstimate(response.text || "No estimate generated.");
       setStep('estimate');
-    } catch (err) {
+    } catch (err: any) {
       console.error("AI Error:", err);
-      setError("An error occurred while generating your estimate. Please check your API key.");
+      if (err.message?.includes("API Key") || err.message?.includes("API key")) {
+        setError("Invalid or missing API Key. Please click the 'Secrets' icon in the AI Studio sidebar and add your GEMINI_API_KEY.");
+      } else {
+        setError("An error occurred while generating your estimate. Please try again.");
+      }
     } finally {
       setIsLoading(false);
     }
@@ -365,9 +369,11 @@ Please generate the estimate now.
 
                 <div className="prose prose-slate dark:prose-invert max-w-none overflow-x-auto">
                   <div className="bg-slate-50 dark:bg-[#17191b] p-4 rounded-xl border border-slate-200 dark:border-slate-700">
-                    <ReactMarkdown className="markdown-body">
-                      {estimate}
-                    </ReactMarkdown>
+                    <div className="markdown-body">
+                      <ReactMarkdown>
+                        {estimate}
+                      </ReactMarkdown>
+                    </div>
                   </div>
                 </div>
 
