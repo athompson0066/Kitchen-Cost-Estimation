@@ -3,12 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 import { Calculator, ArrowRight, User, AlertCircle, MapPin, Construction, CheckCircle2 } from 'lucide-react';
 import { AgencyEstimator } from './components/AgencyEstimator';
 import { KitchenEstimatorWidget } from './components/KitchenEstimatorWidget';
 
 export default function App() {
+  const [isAgencyPopupOpen, setIsAgencyPopupOpen] = useState(false);
+
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900 font-sans text-slate-900 dark:text-slate-100 selection:bg-orange-200">
       
@@ -38,12 +40,15 @@ export default function App() {
           <p className="text-xl text-slate-600 dark:text-slate-300 mb-10 max-w-2xl mx-auto">
             The 2026 AI-Powered Kitchen Estimator for Pro Remodelers.
           </p>
+          <button 
+            onClick={() => setIsAgencyPopupOpen(true)}
+            className="inline-flex items-center justify-center gap-2 bg-[#e67e22] hover:bg-orange-600 text-white px-8 py-4 rounded-full font-bold text-lg transition-transform hover:scale-105 shadow-xl shadow-orange-500/20"
+          >
+            Try the Aiolos Estimator
+          </button>
         </div>
 
-        {/* Agency Estimator Embedding */}
-        <div className="mb-32 flex justify-center">
-          <AgencyEstimator />
-        </div>
+
 
         {/* Features Grid */}
         <div className="grid md:grid-cols-2 gap-8 lg:gap-12 mb-32">
@@ -141,7 +146,7 @@ export default function App() {
             <h2 className="text-3xl lg:text-4xl font-bold mb-6">Ready to put your lead gen on autopilot?</h2>
             <p className="text-lg text-slate-300 dark:text-slate-600 mb-8">Join the elite Canadian remodelers using Aiolos Media Intelligence.</p>
             <button 
-              onClick={() => window.scrollTo(0,0)}
+              onClick={() => setIsAgencyPopupOpen(true)}
               className="inline-flex items-center justify-center gap-2 bg-[#e67e22] hover:bg-orange-600 text-white px-8 py-4 rounded-full font-bold text-lg transition-transform hover:scale-105"
             >
               Calculate Your Custom Integration
@@ -151,7 +156,8 @@ export default function App() {
 
       </div>
       
-      {/* Floating Widget */}
+      {/* Popups */}
+      <AgencyEstimator isOpen={isAgencyPopupOpen} onClose={() => setIsAgencyPopupOpen(false)} />
       <KitchenEstimatorWidget />
 
     </div>

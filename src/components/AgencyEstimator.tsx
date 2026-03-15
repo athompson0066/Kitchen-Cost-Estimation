@@ -50,7 +50,12 @@ const SERVICES = [
   { id: 'CRM & Google Sheets Sync', label: 'CRM & Sheets Sync', desc: 'Automated data routing and backup', icon: Verified },
 ];
 
-export function AgencyEstimator() {
+interface AgencyEstimatorProps {
+  isOpen: boolean;
+  onClose: () => void;
+}
+
+export function AgencyEstimator({ isOpen, onClose }: AgencyEstimatorProps) {
   const [step, setStep] = useState<Step>('calculator');
   const [userData, setUserData] = useState<UserData>({ name: '', email: '' });
   const [projectData, setProjectData] = useState<ProjectData>({ 
@@ -157,8 +162,25 @@ export function AgencyEstimator() {
   };
 
   return (
-    <div className="w-full max-w-md bg-white dark:bg-[#1e2124] rounded-3xl shadow-2xl border border-slate-200/50 dark:border-slate-700/50 flex flex-col overflow-hidden mx-auto">
-      {/* Header */}
+    <AnimatePresence>
+      {isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 sm:mt-0 mt-10">
+          {/* Backdrop */}
+          <motion.div 
+            initial={{ opacity: 0 }} 
+            animate={{ opacity: 1 }} 
+            exit={{ opacity: 0 }} 
+            onClick={onClose}
+            className="absolute inset-0 bg-slate-900/40 backdrop-blur-md" 
+          />
+          
+          <motion.div 
+            initial={{ scale: 0.95, opacity: 0, y: 20 }}
+            animate={{ scale: 1, opacity: 1, y: 0 }}
+            exit={{ scale: 0.95, opacity: 0, y: 20 }}
+            className="w-full max-w-md bg-white dark:bg-[#1e2124] rounded-3xl shadow-2xl border border-slate-200/50 dark:border-slate-700/50 flex flex-col overflow-hidden relative z-10 max-h-[90vh]"
+          >
+            {/* Header */}
       <div className="bg-slate-900 text-white p-5 shrink-0 relative overflow-hidden">
         <div className="absolute inset-0 opacity-10 bg-[radial-gradient(circle_at_1px_1px,_#ffffff_1px,_transparent_0)] bg-[size:16px_16px]"></div>
         
@@ -169,6 +191,12 @@ export function AgencyEstimator() {
             </div>
             <span className="text-xs font-bold uppercase tracking-wider text-slate-300">Aiolos Estimator</span>
           </div>
+          <button 
+            onClick={onClose}
+            className="text-slate-400 hover:text-white bg-white/5 hover:bg-white/10 p-1.5 rounded-full transition-colors"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
 
         <div className="relative">
@@ -387,6 +415,7 @@ export function AgencyEstimator() {
                    <button 
                       onClick={() => {
                          setStep('calculator');
+                         onClose();
                       }}
                       className="w-full bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 dark:text-slate-900 text-white font-semibold py-3 flex items-center justify-center rounded-xl shadow-lg transition-colors"
                    >
@@ -399,7 +428,10 @@ export function AgencyEstimator() {
           </motion.div>
         </AnimatePresence>
       </div>
-      
-    </div>
+            
+          </motion.div>
+        </div>
+      )}
+    </AnimatePresence>
   );
 }
