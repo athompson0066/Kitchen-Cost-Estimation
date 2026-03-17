@@ -3,45 +3,26 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
-  Construction, 
-  X, 
-  User, 
-  Mail, 
-  MapPin, 
-  ArrowRight, 
-  ArrowLeft, 
-  Verified, 
-  Calculator, 
-  Loader2,
-  AlertCircle,
-  Home,
-  Hammer,
-  Sparkles,
-  ChevronRight,
-  MessageSquare,
-  ShieldCheck,
-  CheckCircle2
+  Construction, X, Calculator, Loader2, Home, Hammer, Sparkles, ShieldCheck, CheckCircle2, ChevronRight, Send, MapPin, CalendarDays, Clock
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { getGeminiModel } from '../lib/gemini';
 import { parseKitchenCsv, type KitchenPriceItem } from '../lib/kitchenCsvParser';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-type Step = 'user-info' | 'kitchen-size' | 'materials' | 'services' | 'estimate';
-
 interface UserData {
   name: string;
   email: string;
+  phone: string;
   city: string;
+  postalCode: string;
 }
 
 interface ProjectData {
@@ -49,6 +30,9 @@ interface ProjectData {
   cabinetQuality: string;
   countertopType: string;
   additionalItems: string[];
+  layoutDescription: string;
+  jobDate: string;
+  jobTime: string;
 }
 
 const CABINET_OPTIONS = [
@@ -74,138 +58,291 @@ const SERVICE_OPTIONS = [
   'Walls & Ceiling (Premium)'
 ];
 
+type FieldState = 'name' | 'email' | 'phone' | 'city' | 'postalCode' | 'sqft' | 'layoutDescription' | 'cabinetQuality' | 'countertopType' | 'additionalItems' | 'jobDate' | 'jobTime' | 'confirm_estimate' | 'done';
+
+interface ChatMessage {
+  id: string;
+  role: 'bot' | 'user';
+  type: 'text' | 'options' | 'services' | 'estimate' | 'typing' | 'date' | 'time' | 'cityPrompt';
+  content: string | any;
+  options?: any[];
+}
+
 export function KitchenEstimatorWidget() {
   const [isOpen, setIsOpen] = useState(false);
-  const [step, setStep] = useState<Step>('user-info');
-  const [userData, setUserData] = useState<UserData>({ name: '', email: '', city: '' });
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [inputValue, setInputValue] = useState("");
+  const [currentField, setCurrentField] = useState<FieldState>('name');
+  
+  const [userData, setUserData] = useState<UserData>({ name: '', email: '', phone: '', city: '', postalCode: '' });
   const [projectData, setProjectData] = useState<ProjectData>({ 
-    sqft: '', 
-    cabinetQuality: '', 
-    countertopType: '',
-    additionalItems: []
+    sqft: '', cabinetQuality: '', countertopType: '', additionalItems: [], layoutDescription: '', jobDate: '', jobTime: ''
   });
   const [priceList, setPriceList] = useState<KitchenPriceItem[]>([]);
-  const [estimate, setEstimate] = useState<string | null>(null);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [tempServices, setTempServices] = useState<string[]>([]);
+  const [tempPickerValue, setTempPickerValue] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     parseKitchenCsv().then(setPriceList).catch(err => {
       console.error("Failed to load price list:", err);
-      setError("Failed to load price data. Please try again.");
     });
   }, []);
 
-  const handleUserInfoSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (userData.name && userData.email && userData.city) {
-      setStep('kitchen-size');
+  // Initialize chat
+  useEffect(() => {
+    if (isOpen && messages.length === 0) {
+      setMessages([
+        { id: '1', role: 'bot', type: 'text', content: "Hi, I'm Sammie! I've spent years analyzing kitchen renovations. I'm here to take the guesswork out of your budget and give you a realistic, tailored estimate." }
+      ]);
+      
+      const typingId = Date.now().toString() + '-typing';
+      setTimeout(() => {
+        setMessages(prev => [...prev, { id: typingId, role: 'bot', type: 'typing', content: '' }]);
+      }, 300);
+
+      setTimeout(() => {
+        setMessages(prev => [
+          ...prev.filter(m => m.id !== typingId),
+          { id: '2', role: 'bot', type: 'text', content: "Let's get started. What's your full name?" }
+        ]);
+      }, 1500);
+    }
+  }, [isOpen]);
+
+  // Auto-scroll to bottom of chat
+  useEffect(() => {
+    if (scrollRef.current) {
+        scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+    }
+  }, [messages, tempServices, inputValue, tempPickerValue]);
+
+  const addBotMessage = (msg: Omit<ChatMessage, 'id' | 'role'>, delay = 600) => {
+    const typingId = Date.now().toString() + '-typing';
+    setMessages(prev => [...prev, { id: typingId, role: 'bot', type: 'typing', content: '' }]);
+    
+    setTimeout(() => {
+      setMessages(prev => [
+        ...prev.filter(m => m.id !== typingId),
+        { ...msg, id: Date.now().toString(), role: 'bot' }
+      ]);
+    }, delay);
+  };
+
+  const handleSendText = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const val = inputValue.trim();
+    if (!val) return;
+    
+    setMessages(prev => [...prev, { id: Date.now().toString(), role: 'user', type: 'text', content: val }]);
+    setInputValue("");
+    processAnswer(val);
+  };
+
+  const processAnswer = (answer: string) => {
+    switch (currentField) {
+      case 'name':
+        setUserData(prev => ({ ...prev, name: answer }));
+        setCurrentField('email');
+        addBotMessage({ type: 'text', content: `Nice to meet you, ${answer.split(' ')[0]}! What's your email address so we can send you a copy of the estimate?` });
+        break;
+      case 'email':
+        setUserData(prev => ({ ...prev, email: answer }));
+        setCurrentField('phone');
+        addBotMessage({ type: 'text', content: `Got it. Just in case our designers need to reach out, what's a good phone number for you?` });
+        break;
+      case 'phone':
+        setUserData(prev => ({ ...prev, phone: answer }));
+        setCurrentField('city');
+        addBotMessage({ 
+          type: 'cityPrompt', 
+          content: `Great. Please type the city where the project is located.` 
+        });
+        break;
+      case 'city':
+        setUserData(prev => ({ ...prev, city: answer }));
+        setCurrentField('postalCode');
+        addBotMessage({ type: 'text', content: `Thanks! And what is the ZIP or Postal Code for the property?` });
+        break;
+      case 'postalCode':
+        setUserData(prev => ({ ...prev, postalCode: answer }));
+        setCurrentField('sqft');
+        addBotMessage({ type: 'text', content: `Awesome. Roughly how large is the kitchen space in square feet? (Average is ~150)` });
+        break;
+      case 'sqft':
+        setProjectData(prev => ({ ...prev, sqft: answer }));
+        setCurrentField('jobDate');
+        setTempPickerValue('');
+        addBotMessage({ 
+          type: 'date', 
+          content: `When were you hoping to get this project started? Select a target date below:`
+        });
+        break;
+      case 'layoutDescription':
+        setProjectData(prev => ({ ...prev, layoutDescription: answer }));
+        setCurrentField('cabinetQuality');
+        addBotMessage({ 
+          type: 'options', 
+          content: `Awesome. Now let's pick some finishes. What style of cabinets are you envisioning?`,
+          options: CABINET_OPTIONS.map(c => ({ label: c.label, value: c.id, desc: c.desc, icon: c.icon }))
+        });
+        break;
+      default:
+        break;
     }
   };
 
-  const handleSizeSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (projectData.sqft) {
-      setStep('materials');
+  const handleOptionSelect = (val: string, label: string) => {
+    setMessages(prev => [...prev, { id: Date.now().toString(), role: 'user', type: 'text', content: label }]);
+    
+    switch (currentField) {
+      case 'cabinetQuality':
+        setProjectData(prev => ({ ...prev, cabinetQuality: val }));
+        setCurrentField('countertopType');
+        addBotMessage({ 
+          type: 'options', 
+          content: `Excellent choice. And what about countertops?`,
+          options: COUNTERTOP_OPTIONS.map(c => ({ label: c.label, value: c.id, desc: c.desc, icon: c.icon }))
+        });
+        break;
+      case 'countertopType':
+        setProjectData(prev => ({ ...prev, countertopType: val }));
+        setCurrentField('additionalItems');
+        addBotMessage({ 
+          type: 'services', 
+          content: `Almost done! Select any additional services or materials you might need for the project.`
+        });
+        break;
     }
+  };
+
+  const confirmDate = () => {
+    if (!tempPickerValue) return;
+    const dateObj = new Date(tempPickerValue);
+    const dateStr = dateObj.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    setProjectData(prev => ({ ...prev, jobDate: tempPickerValue }));
+    setMessages(prev => [...prev, { id: Date.now().toString(), role: 'user', type: 'text', content: dateStr }]);
+    
+    setCurrentField('jobTime');
+    setTempPickerValue('');
+    addBotMessage({ type: 'time', content: 'What time of day generally works best for the work to take place?' });
+  };
+
+  const confirmTime = () => {
+    if (!tempPickerValue) return;
+    
+    // Format if it's a 24h standard time string
+    let displayTime = tempPickerValue;
+    if (tempPickerValue.includes(':')) {
+       try {
+         const [hours, minutes] = tempPickerValue.split(':');
+         const date = new Date();
+         date.setHours(parseInt(hours, 10), parseInt(minutes, 10));
+         displayTime = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+       } catch (e) {}
+    }
+
+    setProjectData(prev => ({ ...prev, jobTime: tempPickerValue }));
+    setMessages(prev => [...prev, { id: Date.now().toString(), role: 'user', type: 'text', content: displayTime }]);
+    
+    setCurrentField('layoutDescription');
+    addBotMessage({ type: 'text', content: `Perfect. Finally, briefly describe your current kitchen layout or how you want it to change.` });
+  };
+
+  const toggleTempService = (service: string) => {
+    setTempServices(prev => prev.includes(service) ? prev.filter(s => s !== service) : [...prev, service]);
+  };
+
+  const confirmServices = () => {
+    setProjectData(prev => ({ ...prev, additionalItems: tempServices }));
+    setCurrentField('confirm_estimate');
+    setMessages(prev => [...prev, { id: Date.now().toString(), role: 'user', type: 'text', content: `${tempServices.length} additional services selected.` }]);
+    
+    addBotMessage({ type: 'text', content: "Okay, I have everything I need! Give me just a second to calculate your estimate based on our current pricing models." });
+    setTimeout(() => {
+      generateEstimate();
+    }, 1500);
   };
 
   const generateEstimate = async () => {
     setIsLoading(true);
-    setError(null);
+    setCurrentField('done');
+    
+    const typingId = 'estimate-typing';
+    setMessages(prev => [...prev, { id: typingId, role: 'bot', type: 'typing', content: '' }]);
+
     try {
       const ai = getGeminiModel();
-      
       const csvContext = JSON.stringify(priceList, null, 2);
       
       const systemInstruction = `
-Role: You are the "Aiolos Media AI Estimator," a professional construction logic engine for the Canadian market.
+Role: You are the "Aiolos Lead-Filter Agent," a utility tool designed to qualify residential kitchen leads in Canada.
 
-Core Instruction: You must provide project estimates based EXCLUSIVELY on the data provided in the attached Kitchen_Renovation_Estimator_2026.csv file. Do not use outside pricing data or "general knowledge" for costs.
+Core Objective: Transform raw homeowner inquiries into a structured JSON "Project Scope" using the provided Kitchen_Renovation_Estimator_2026.csv.
 
-Data Context (CSV Content):
+1. Data Grounding & Pricing Logic:
+- Strict Adherence: Use ONLY the material and labor costs found in the CSV.
+- Broad Ranges: Instead of a single "Grand Total," provide a Budget Range (e.g., +/- 15%). 
+- Regional Multipliers: Apply the 1.25x factor for Toronto, 1.0x for Winnipeg.
+
+2. Structure requirement:
+You MUST return ONLY valid JSON matching this exact structure, with no markdown code blocks formatting it.
+{
+  "intro": "A friendly personalized greeting acknowledging their city and space.",
+  "breakdown": [
+    { "category": "String", "estimated_cost": "String" }
+  ],
+  "totalRange": "String",
+  "leadGrade": "A/B/C",
+  "disclaimer": "String"
+}
+
+Data Context:
 ${csvContext}
-
-Calculation Logic:
-1. Identify Items: Match user inputs to the Item Name in the CSV.
-2. Calculate Line Subtotals: Use the formula: (Base Material Cost * Quantity) * Labor Multiplier * Regional Multiplier.
-3. Apply Regional Context:
-   * If the user is in Toronto, use the Regional Multiplier provided in the CSV (1.25).
-   * If the user is in Winnipeg, set the Regional Multiplier to 1.0.
-4. Summary Math:
-   * Calculate a Total Subtotal.
-   * Add a 12% Contingency Fund.
-   * Add Tax: 13% for Toronto/Ontario; 5% for Winnipeg/Manitoba.
-
-Output Format:
-Always provide a structured table showing the Category, Item, and Subtotal. Conclude with the Grand Total in CAD. Use Markdown for the table.
-
-Guardrails: If a user asks for an item not in the CSV, state: "That item is not in our current 2026 price list. Please contact Aiolos Media for a custom quote."
-      `;
+`;
 
       const prompt = `
-User Details:
 Name: ${userData.name}
-Email: ${userData.email}
 City: ${userData.city}
-
-Project Details:
-Kitchen Square Footage: ${projectData.sqft} sq ft
-Cabinet Selection: ${projectData.cabinetQuality}
-Countertop Selection: ${projectData.countertopType}
-Additional Items Requested: ${projectData.additionalItems.join(', ')}
-
-Please generate the estimate now.
-      `;
+Postal Code: ${userData.postalCode}
+Job Date: ${projectData.jobDate}
+Job Time: ${projectData.jobTime}
+Sqft: ${projectData.sqft}
+Cabinets: ${projectData.cabinetQuality}
+Counters: ${projectData.countertopType}
+Extras: ${tempServices.join(', ')}
+Layout: ${projectData.layoutDescription}
+`;
 
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
         contents: prompt,
-        config: {
-          systemInstruction,
-        }
+        config: { systemInstruction, responseMimeType: "application/json" }
       });
 
-      setEstimate(response.text || "No estimate generated.");
-      setStep('estimate');
-    } catch (err: any) {
-      console.error("AI Error:", err);
-      if (err.message?.includes("API Key") || err.message?.includes("API key")) {
-        setError("Invalid or missing API Key. Please click the 'Secrets' icon in the AI Studio sidebar and add your GEMINI_API_KEY.");
-      } else {
-        setError("An error occurred while generating your estimate. Please try again.");
-      }
+      const resultText = response.text || '{}';
+      const cleanJson = resultText.replace(/\`\`\`json/g, '').replace(/\`\`\`/g, '');
+      const result = JSON.parse(cleanJson);
+      
+      setMessages(prev => prev.filter(m => m.id !== typingId));
+      
+      addBotMessage({ type: 'text', content: result.intro }, 0);
+      addBotMessage({ type: 'estimate', content: result }, 800);
+      
+    } catch (err) {
+      console.error(err);
+      setMessages(prev => prev.filter(m => m.id !== typingId));
+      addBotMessage({ type: 'text', content: "I'm so sorry, but I ran into an issue calculating your estimate. Let me connect you with a human expert!" }, 0);
     } finally {
       setIsLoading(false);
     }
   };
 
-  const toggleService = (itemName: string) => {
-    setProjectData(prev => ({
-      ...prev,
-      additionalItems: prev.additionalItems.includes(itemName)
-        ? prev.additionalItems.filter(i => i !== itemName)
-        : [...prev.additionalItems, itemName]
-    }));
-  };
-
-  const getStepNumber = () => {
-    switch(step) {
-      case 'user-info': return 1;
-      case 'kitchen-size': return 2;
-      case 'materials': return 3;
-      case 'services': return 4;
-      case 'estimate': return 5;
-      default: return 1;
-    }
-  };
+  const isTextInput = ['name', 'email', 'phone', 'city', 'postalCode', 'sqft', 'layoutDescription'].includes(currentField);
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-900 font-sans text-slate-900 dark:text-slate-100 selection:bg-orange-200">
-      
-
-
-      {/* Floating Action Button */}
+    <>
       <AnimatePresence>
         {!isOpen && (
           <motion.button
@@ -221,7 +358,6 @@ Please generate the estimate now.
         )}
       </AnimatePresence>
 
-      {/* Popup Widget Container */}
       <AnimatePresence>
         {isOpen && (
           <motion.div
@@ -229,370 +365,336 @@ Please generate the estimate now.
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
             transition={{ type: "spring", bounce: 0.3, duration: 0.6 }}
-            className="fixed bottom-6 right-6 lg:bottom-10 lg:right-10 w-[min(calc(100vw-48px),450px)] max-h-[85vh] bg-white/95 dark:bg-[#1e2124]/95 backdrop-blur-2xl rounded-3xl shadow-2xl border border-slate-200/50 dark:border-slate-700/50 z-50 flex flex-col overflow-hidden origin-bottom-right"
+            className="fixed bottom-6 right-6 lg:bottom-10 lg:right-10 w-[min(calc(100vw-32px),480px)] h-[min(85vh,700px)] bg-white dark:bg-[#1a1c1e] rounded-[24px] shadow-2xl border border-slate-200/50 dark:border-slate-800 z-50 flex flex-col overflow-hidden origin-bottom-right"
           >
             {/* Header */}
-            <div className="bg-slate-900 text-white p-5 shrink-0 relative overflow-hidden">
-              <div className="absolute inset-0 opacity-10 bg-[radial-gradient(circle_at_1px_1px,_#ffffff_1px,_transparent_0)] bg-[size:16px_16px]"></div>
+            <div className="bg-slate-900 text-white px-5 py-4 shrink-0 relative overflow-hidden flex items-center justify-between">
+              <div className="absolute inset-0">
+                 <img src="/estimator_header.png" alt="Luxury Kitchen Header" className="w-full h-full object-cover opacity-20 mix-blend-luminosity" />
+                 <div className="absolute inset-0 bg-gradient-to-t from-slate-900 via-slate-900/60 to-slate-900/10"></div>
+              </div>
               
-              <div className="relative flex items-center justify-between mb-2">
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-full bg-orange-500/20 flex items-center justify-center border border-orange-500/30">
-                    <Construction className="text-[#e67e22] w-4 h-4" />
+              <div className="relative flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-slate-200 dark:bg-slate-800 flex items-center justify-center border-2 border-orange-500/50 shrink-0 overflow-hidden shadow-sm">
+                  <img src="https://cdn.prod.website-files.com/666ad77562dfabab1eb27f6c/66fbe5aea2e37e10f5fe1c9e_666ad77562dfabab1eb280b1_art-of-professional-headshots%20(1).jpeg" alt="Sammie Stewart" className="w-full h-full object-cover" />
+                </div>
+                <div>
+                  <h2 className="font-bold tracking-tight text-white leading-tight text-base">Sammie Stewart</h2>
+                  <div className="flex items-center gap-1.5 text-[11px] text-slate-400 font-medium">
+                    <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
+                    Cost Estimator
                   </div>
-                  <span className="text-xs font-bold uppercase tracking-wider text-slate-300">Aiolos Estimator</span>
-                </div>
-                <button 
-                  onClick={() => setIsOpen(false)}
-                  className="text-slate-400 hover:text-white bg-white/5 hover:bg-white/10 p-1.5 rounded-full transition-colors"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-
-              <div className="relative">
-                <h2 className="text-xl font-bold tracking-tight">AI Kitchen Quote</h2>
-                
-                {/* Progress Bar */}
-                <div className="mt-4 flex gap-1 h-1">
-                  {[1,2,3,4,5].map(i => (
-                    <div 
-                      key={i} 
-                      className={cn(
-                        "flex-1 rounded-full transition-all duration-500",
-                        getStepNumber() >= i ? "bg-[#e67e22]" : "bg-slate-700"
-                      )} 
-                    />
-                  ))}
                 </div>
               </div>
+              <button onClick={() => setIsOpen(false)} className="relative text-slate-400 hover:text-white transition-colors bg-white/5 p-2 rounded-full hover:bg-white/10">
+                <X className="w-4 h-4" />
+              </button>
             </div>
 
-            {/* Scrollable Body */}
-            <div className="p-6 overflow-y-auto custom-scrollbar flex-1 relative">
-              <AnimatePresence mode="wait">
-                <motion.div
-                  key={step}
-                  initial={{ opacity: 0, x: 20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -20 }}
-                  transition={{ duration: 0.2 }}
-                  className="h-full"
-                >
-                  {/* STEP 1: USER INFO */}
-                  {step === 'user-info' && (
-                    <form onSubmit={handleUserInfoSubmit} className="space-y-5 h-full flex flex-col">
-                      <div>
-                        <h3 className="text-lg font-bold text-slate-900 dark:text-white">Let's get started</h3>
-                        <p className="text-sm text-slate-500 dark:text-slate-400">Where should we send your detailed estimate?</p>
+            {/* Chat Area */}
+            <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 custom-scrollbar bg-slate-50 dark:bg-[#111213] flex flex-col gap-4">
+              <AnimatePresence initial={false}>
+                {messages.map((msg, idx) => (
+                  <motion.div 
+                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    transition={{ type: "spring", bounce: 0.4 }}
+                    key={msg.id} 
+                    className={cn(
+                      "flex max-w-[85%]", // Wider allowable space for elements
+                      msg.role === 'user' ? "ml-auto justify-end" : "justify-start"
+                    )}
+                  >
+                    {/* Bot Avatar */}
+                    {msg.role === 'bot' && (
+                      <div className="w-6 h-6 shrink-0 rounded-full bg-slate-200 dark:bg-slate-800 mt-1 mr-2 flex items-center justify-center border border-slate-300 dark:border-slate-700 overflow-hidden">
+                        <img src="https://cdn.prod.website-files.com/666ad77562dfabab1eb27f6c/66fbe5aea2e37e10f5fe1c9e_666ad77562dfabab1eb280b1_art-of-professional-headshots%20(1).jpeg" alt="Sammie" className="w-full h-full object-cover" />
                       </div>
-
-                      <div className="space-y-4 flex-1">
-                        <div className="space-y-1.5">
-                          <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wide ml-1">Full Name</label>
-                          <div className="relative">
-                            <User className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
-                            <input 
-                              required
-                              className="w-full pl-10 pr-4 py-2.5 bg-slate-50 dark:bg-[#17191b] border border-slate-200 dark:border-slate-800 rounded-xl focus:ring-2 focus:ring-orange-500/50 focus:border-[#e67e22] outline-none transition-all text-sm" 
-                              placeholder="Jane Doe" 
-                              type="text"
-                              value={userData.name}
-                              onChange={e => setUserData({...userData, name: e.target.value})}
-                            />
-                          </div>
-                        </div>
-
-                        <div className="space-y-1.5">
-                          <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wide ml-1">Email Address</label>
-                          <div className="relative">
-                            <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
-                            <input 
-                              required
-                              className="w-full pl-10 pr-4 py-2.5 bg-slate-50 dark:bg-[#17191b] border border-slate-200 dark:border-slate-800 rounded-xl focus:ring-2 focus:ring-orange-500/50 focus:border-[#e67e22] outline-none transition-all text-sm" 
-                              placeholder="jane@example.com" 
-                              type="email"
-                              value={userData.email}
-                              onChange={e => setUserData({...userData, email: e.target.value})}
-                            />
-                          </div>
-                        </div>
-
-                        <div className="space-y-1.5">
-                          <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wide ml-1">Project City</label>
-                          <div className="relative">
-                            <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
-                            <select 
-                              required
-                              className="w-full pl-10 pr-4 py-2.5 bg-slate-50 dark:bg-[#17191b] border border-slate-200 dark:border-slate-800 rounded-xl focus:ring-2 focus:ring-orange-500/50 focus:border-[#e67e22] outline-none transition-all text-sm appearance-none"
-                              value={userData.city}
-                              onChange={e => setUserData({...userData, city: e.target.value})}
-                            >
-                              <option value="" disabled>Select your city...</option>
-                              <option value="Toronto">Toronto, ON</option>
-                              <option value="Winnipeg">Winnipeg, MB</option>
-                            </select>
-                          </div>
-                        </div>
-                      </div>
-
-                      <button 
-                        type="submit"
-                        className="w-full bg-[#e67e22] hover:bg-orange-600 text-white font-semibold py-3 rounded-xl shadow-lg shadow-orange-500/25 transition-all flex items-center justify-center gap-2 group mt-6"
-                      >
-                        Continue
-                        <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-                      </button>
-                    </form>
-                  )}
-
-                  {/* STEP 2: KITCHEN SIZE */}
-                  {step === 'kitchen-size' && (
-                    <form onSubmit={handleSizeSubmit} className="space-y-5 h-full flex flex-col">
-                       <div>
-                        <button type="button" onClick={() => setStep('user-info')} className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-900 dark:hover:text-white mb-2 transition-colors">
-                          <ArrowLeft className="w-3 h-3" /> Back
-                        </button>
-                        <h3 className="text-lg font-bold text-slate-900 dark:text-white">Kitchen Size</h3>
-                        <p className="text-sm text-slate-500 dark:text-slate-400">Estimate the square footage of your kitchen space.</p>
-                      </div>
-
-                      <div className="flex-1 flex flex-col justify-center py-8">
-                        <div className="relative mx-auto w-48">
-                          <input 
-                            required
-                            autoFocus
-                            className="w-full bg-transparent border-b-2 border-slate-300 dark:border-slate-700 focus:border-[#e67e22] dark:focus:border-[#e67e22] text-4xl text-center font-bold text-slate-900 dark:text-white py-2 outline-none transition-colors" 
-                            placeholder="0" 
-                            type="number"
-                            min="50"
-                            max="2000"
-                            value={projectData.sqft}
-                            onChange={e => setProjectData({...projectData, sqft: e.target.value})}
-                          />
-                          <span className="absolute -right-8 bottom-4 text-slate-400 font-medium">sq ft</span>
-                        </div>
-                        <p className="text-center text-xs text-slate-400 mt-4">Average standard kitchen is ~150 sq ft</p>
-                      </div>
-
-                      <button 
-                        type="submit"
-                        disabled={!projectData.sqft}
-                        className="w-full bg-[#e67e22] hover:bg-orange-600 disabled:opacity-50 disabled:bg-slate-300 text-white font-semibold py-3 rounded-xl shadow-lg shadow-orange-500/25 transition-all flex items-center justify-center gap-2 group mt-6"
-                      >
-                        Next: Materials
-                        <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-                      </button>
-                    </form>
-                  )}
-
-                  {/* STEP 3: MATERIALS */}
-                  {step === 'materials' && (
-                    <div className="space-y-6 h-full flex flex-col">
-                      <div>
-                         <button onClick={() => setStep('kitchen-size')} className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-900 dark:hover:text-white mb-2 transition-colors">
-                          <ArrowLeft className="w-3 h-3" /> Back
-                        </button>
-                        <h3 className="text-lg font-bold text-slate-900 dark:text-white">Core Materials</h3>
-                        <p className="text-sm text-slate-500 dark:text-slate-400">Select your preferred finishes.</p>
-                      </div>
-
-                      <div className="flex-1 space-y-6">
-                        <div className="space-y-3">
-                          <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wide">Cabinet Style</label>
-                          <div className="grid gap-2">
-                            {CABINET_OPTIONS.map(opt => (
-                              <button
-                                key={opt.id}
-                                onClick={() => setProjectData({...projectData, cabinetQuality: opt.id})}
-                                className={cn(
-                                  "flex items-center gap-3 p-3 rounded-xl border-2 text-left transition-all",
-                                  projectData.cabinetQuality === opt.id 
-                                    ? "border-[#e67e22] bg-orange-50 dark:bg-orange-500/10" 
-                                    : "border-slate-100 dark:border-slate-800 hover:border-slate-200 dark:hover:border-slate-700 bg-white dark:bg-[#1a1c1e]"
-                                )}
-                              >
-                                <div className={cn("p-2 rounded-lg", projectData.cabinetQuality === opt.id ? "bg-[#e67e22] text-white" : "bg-slate-100 dark:bg-slate-800 text-slate-500")}>
-                                  <opt.icon className="w-4 h-4" />
-                                </div>
-                                <div>
-                                  <div className={cn("text-sm font-bold", projectData.cabinetQuality === opt.id ? "text-slate-900 dark:text-white" : "text-slate-700 dark:text-slate-300")}>{opt.label}</div>
-                                  <div className="text-xs text-slate-500 font-medium">{opt.desc}</div>
-                                </div>
-                                {projectData.cabinetQuality === opt.id && <CheckCircle2 className="w-4 h-4 text-[#e67e22] ml-auto shrink-0" />}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-
-                        <div className="space-y-3">
-                          <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wide">Countertops</label>
-                          <div className="grid gap-2">
-                            {COUNTERTOP_OPTIONS.map(opt => (
-                              <button
-                                key={opt.id}
-                                onClick={() => setProjectData({...projectData, countertopType: opt.id})}
-                                className={cn(
-                                  "flex items-center gap-3 p-3 rounded-xl border-2 text-left transition-all",
-                                  projectData.countertopType === opt.id 
-                                    ? "border-[#e67e22] bg-orange-50 dark:bg-orange-500/10" 
-                                    : "border-slate-100 dark:border-slate-800 hover:border-slate-200 dark:hover:border-slate-700 bg-white dark:bg-[#1a1c1e]"
-                                )}
-                              >
-                                <div className={cn("p-2 rounded-lg", projectData.countertopType === opt.id ? "bg-[#e67e22] text-white" : "bg-slate-100 dark:bg-slate-800 text-slate-500")}>
-                                  <opt.icon className="w-4 h-4" />
-                                </div>
-                                <div>
-                                  <div className={cn("text-sm font-bold", projectData.countertopType === opt.id ? "text-slate-900 dark:text-white" : "text-slate-700 dark:text-slate-300")}>{opt.label}</div>
-                                  <div className="text-xs text-slate-500 font-medium">{opt.desc}</div>
-                                </div>
-                                {projectData.countertopType === opt.id && <CheckCircle2 className="w-4 h-4 text-[#e67e22] ml-auto shrink-0" />}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-
-                      <button 
-                        onClick={() => setStep('services')}
-                        disabled={!projectData.cabinetQuality || !projectData.countertopType}
-                        className="w-full bg-[#e67e22] hover:bg-orange-600 disabled:opacity-50 disabled:bg-slate-300 text-white font-semibold py-3 rounded-xl shadow-lg shadow-orange-500/25 transition-all flex items-center justify-center gap-2 group mt-6"
-                      >
-                        Next: Services
-                        <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-                      </button>
-                    </div>
-                  )}
-
-                  {/* STEP 4: SERVICES */}
-                  {step === 'services' && (
-                    <div className="space-y-5 h-full flex flex-col">
-                       <div>
-                         <button onClick={() => setStep('materials')} className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-900 dark:hover:text-white mb-2 transition-colors">
-                          <ArrowLeft className="w-3 h-3" /> Back
-                        </button>
-                        <h3 className="text-lg font-bold text-slate-900 dark:text-white">Additional Services</h3>
-                        <p className="text-sm text-slate-500 dark:text-slate-400">Select any extra labor or materials needed.</p>
-                      </div>
-
-                      <div className="flex-1 overflow-y-auto pr-1">
-                        <div className="grid grid-cols-1 gap-2">
-                          {SERVICE_OPTIONS.map(item => (
-                            <button
-                              key={item}
-                              onClick={() => toggleService(item)}
-                              className={cn(
-                                "text-left px-4 py-3 rounded-xl text-sm font-medium border-2 transition-all flex justify-between items-center group",
-                                projectData.additionalItems.includes(item)
-                                  ? "bg-orange-50 border-orange-200 text-[#e67e22] dark:bg-orange-500/10 dark:border-orange-500/30"
-                                  : "bg-white border-slate-100 text-slate-600 hover:border-slate-200 dark:bg-[#1a1c1e] dark:border-slate-800 dark:hover:border-slate-700 dark:text-slate-300"
-                              )}
-                            >
-                              {item}
-                              <div className={cn(
-                                "w-4 h-4 rounded-full border flex items-center justify-center transition-colors",
-                                projectData.additionalItems.includes(item)
-                                  ? "bg-[#e67e22] border-[#e67e22]"
-                                  : "border-slate-300 dark:border-slate-600 group-hover:border-slate-400"
-                              )}>
-                                {projectData.additionalItems.includes(item) && <CheckCircle2 className="w-3 h-3 text-white" />}
-                              </div>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-
-                      {error && (
-                        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 p-3 rounded-xl flex items-center gap-2 text-red-600 dark:text-red-400 text-xs">
-                          <AlertCircle className="w-4 h-4 shrink-0" />
-                          {error}
+                    )}
+                    
+                    <div className={cn(
+                      "flex flex-col gap-1 w-full",
+                      msg.role === 'user' ? "items-end" : "items-start"
+                    )}>
+                      {msg.type === 'typing' && (
+                         <div className="bg-white dark:bg-[#25282a] border border-slate-200 dark:border-slate-800 px-4 py-3.5 rounded-2xl rounded-tl-sm shadow-sm flex items-center gap-1.5 w-fit">
+                           <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce"></span>
+                           <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce [animation-delay:-0.15s]"></span>
+                           <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce [animation-delay:-0.3s]"></span>
+                         </div>
+                      )}
+                      
+                      {msg.type === 'text' && (
+                        <div className={cn(
+                          "px-4 py-2.5 rounded-[18px] text-[15px] leading-relaxed w-fit shadow-sm border",
+                          msg.role === 'user' 
+                            ? "bg-[#e67e22] text-white rounded-tr-sm border-orange-600/20" 
+                            : "bg-white dark:bg-[#1e2022] border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 rounded-tl-sm"
+                        )}>
+                          {msg.content}
                         </div>
                       )}
 
-                      <button 
-                        onClick={generateEstimate}
-                        disabled={isLoading}
-                        className="w-full bg-[#e67e22] hover:bg-orange-600 disabled:opacity-50 disabled:bg-slate-300 text-white font-semibold py-3.5 rounded-xl shadow-xl shadow-orange-500/25 transition-all flex items-center justify-center gap-2 group mt-4 relative overflow-hidden"
-                      >
-                         <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300 ease-out" />
-                        {isLoading ? (
-                          <>
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                            Analyzing Pricing Data...
-                          </>
-                        ) : (
-                          <>
-                            Generate AI Estimate
-                            <Sparkles className="w-4 h-4" />
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  )}
-
-                  {/* STEP 5: ESTIMATE */}
-                  {step === 'estimate' && estimate && (
-                    <div className="space-y-5 h-full flex flex-col">
-                       <div>
-                         <button onClick={() => setStep('services')} className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-900 dark:hover:text-white mb-2 transition-colors">
-                          <ArrowLeft className="w-3 h-3" /> Edit Requirements
-                        </button>
-                        <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                          <ShieldCheck className="w-5 h-5 text-green-500" />
-                          Your Custom Estimate
-                        </h3>
-                      </div>
-
-                      <div className="flex-1 overflow-y-auto px-1 -mx-1">
-                        <div className="prose prose-sm prose-slate dark:prose-invert max-w-none">
-                          <ReactMarkdown
-                            remarkPlugins={[remarkGfm]}
-                            components={{
-                              table: ({node, ...props}: any) => <div className="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-[#1a1c1e] my-4 shadow-sm"><table className="w-full text-xs text-left" {...props} /></div>,
-                              thead: ({node, ...props}: any) => <thead className="bg-slate-50 dark:bg-slate-800/80 text-slate-500 dark:text-slate-400 font-semibold" {...props} />,
-                              th: ({node, ...props}: any) => <th className="px-3 py-2 border-b border-slate-200 dark:border-slate-700" {...props} />,
-                              td: ({node, ...props}: any) => <td className="px-3 py-2 border-b border-slate-100 dark:border-slate-800 text-slate-700 dark:text-slate-300 last:border-0 font-medium" {...props} />,
-                              h1: ({node, ...props}: any) => <h1 className="text-lg font-bold text-slate-900 dark:text-white mt-0 mb-2" {...props} />,
-                              h2: ({node, ...props}: any) => <h2 className="text-base font-bold text-slate-900 dark:text-white mt-4 mb-2" {...props} />,
-                              h3: ({node, ...props}: any) => <h3 className="text-sm font-bold text-slate-900 dark:text-white mt-4 mb-2 uppercase tracking-wide" {...props} />,
-                              p: ({node, ...props}: any) => <p className="text-slate-600 dark:text-slate-400 leading-relaxed mb-3 text-sm" {...props} />,
-                              ul: ({node, ...props}: any) => <ul className="list-disc list-inside space-y-1 mb-4 text-slate-600 dark:text-slate-400 text-sm" {...props} />,
-                              li: ({node, ...props}: any) => <li className="leading-relaxed" {...props} />,
-                              strong: ({node, ...props}: any) => <strong className="font-semibold text-slate-900 dark:text-white" {...props} />,
-                            }}
-                          >
-                            {estimate}
-                          </ReactMarkdown>
+                      {msg.type === 'cityPrompt' && (
+                        <div className="space-y-2 w-full max-w-[280px]">
+                           <div className="bg-white dark:bg-[#1e2022] border border-slate-200 dark:border-slate-800 rounded-[20px] rounded-tl-sm shadow-sm overflow-hidden flex flex-col">
+                             <div className="h-[80px] w-full relative">
+                               <img src="https://images.unsplash.com/photo-1449844908441-8829872d2607?q=80&w=600&auto=format&fit=crop" alt="Cityscape Map Skyline" className="w-full h-full object-cover opacity-80" />
+                               <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent flex items-end p-2 px-3">
+                                  <div className="flex items-center gap-1.5 text-white bg-black/30 backdrop-blur-md px-2 py-1 rounded-full text-xs font-semibold shadow-sm border border-white/20">
+                                    <MapPin className="w-3.5 h-3.5" />
+                                    <span>Location</span>
+                                  </div>
+                               </div>
+                             </div>
+                             <div className="p-3 text-[15px] leading-relaxed w-full text-slate-800 dark:text-slate-200 bg-white dark:bg-[#1e2022]">
+                               {msg.content}
+                             </div>
+                           </div>
                         </div>
+                      )}
 
-                        <div className="mt-6 bg-[#e67e22]/10 border border-[#e67e22]/20 rounded-xl p-4 flex gap-3 text-sm items-start">
-                          <MessageSquare className="w-5 h-5 text-[#e67e22] shrink-0 mt-0.5" />
-                          <div>
-                            <p className="text-slate-800 dark:text-slate-200 font-semibold mb-1">Ready to move forward?</p>
-                            <p className="text-slate-600 dark:text-slate-400">Our designers are ready to review this estimate with you and start planning your space.</p>
+                      {msg.type === 'date' && (
+                        <div className="space-y-2 w-full max-w-[300px]">
+                          <div className="px-4 py-2.5 rounded-[18px] text-[15px] leading-relaxed w-fit shadow-sm border bg-white dark:bg-[#1e2022] border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 rounded-tl-sm">
+                            {msg.content}
+                          </div>
+                          {currentField === 'jobDate' && (
+                            <div className="bg-white dark:bg-[#1e2022] border border-slate-200 dark:border-slate-800 rounded-2xl p-3 w-full shadow-sm flex flex-col gap-3">
+                              <div className="relative">
+                                <CalendarDays className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 pointer-events-none" />
+                                <input 
+                                  type="date"
+                                  min={new Date().toISOString().split('T')[0]}
+                                  value={tempPickerValue}
+                                  onChange={e => setTempPickerValue(e.target.value)}
+                                  className="w-full bg-slate-50 dark:bg-[#17191b] border border-slate-200 dark:border-slate-700/50 rounded-xl pl-10 pr-4 py-3 outline-none focus:ring-2 focus:ring-[#e67e22] text-slate-800 dark:text-slate-200 font-medium"
+                                />
+                              </div>
+                              <button
+                                disabled={!tempPickerValue}
+                                onClick={confirmDate}
+                                className="w-full bg-[#e67e22] hover:bg-orange-600 focus:ring-2 focus:ring-[#e67e22] disabled:opacity-50 disabled:bg-slate-300 dark:disabled:bg-slate-800 outline-none text-white font-semibold py-2.5 rounded-xl shadow-sm transition-colors flex items-center justify-center gap-2 text-sm"
+                              >
+                                Confirm Date
+                                <ChevronRight className="w-4 h-4" />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {msg.type === 'time' && (
+                        <div className="space-y-2 w-full max-w-[300px]">
+                          <div className="px-4 py-2.5 rounded-[18px] text-[15px] leading-relaxed w-fit shadow-sm border bg-white dark:bg-[#1e2022] border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 rounded-tl-sm">
+                            {msg.content}
+                          </div>
+                          {currentField === 'jobTime' && (
+                            <div className="bg-white dark:bg-[#1e2022] border border-slate-200 dark:border-slate-800 rounded-2xl p-3 w-full shadow-sm flex flex-col gap-3">
+                              <div className="grid grid-cols-3 gap-2">
+                                {[{ l: 'Morning', v: '09:00' }, { l: 'Afternoon', v: '14:00' }, { l: 'Evening', v: '18:00' }].map((t) => (
+                                   <button 
+                                     key={t.v}
+                                     onClick={() => setTempPickerValue(t.v)}
+                                     className={cn(
+                                       "py-2 px-1 rounded-xl text-xs font-semibold border transition-all text-center",
+                                       tempPickerValue === t.v ? "bg-orange-50 border-[#e67e22] text-[#e67e22] dark:bg-orange-900/30" : "bg-slate-50 border-slate-200 text-slate-600 dark:bg-[#17191b] dark:border-slate-700/50 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-600"
+                                     )}
+                                   >{t.l}</button>
+                                ))}
+                              </div>
+                              <div className="relative">
+                                <Clock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 pointer-events-none" />
+                                <input 
+                                  type="time"
+                                  value={tempPickerValue}
+                                  onChange={e => setTempPickerValue(e.target.value)}
+                                  className="w-full bg-slate-50 dark:bg-[#17191b] border border-slate-200 dark:border-slate-700/50 rounded-xl pl-10 pr-4 py-3 outline-none focus:ring-2 focus:ring-[#e67e22] text-slate-800 dark:text-slate-200 font-medium"
+                                />
+                              </div>
+                              <button
+                                disabled={!tempPickerValue}
+                                onClick={confirmTime}
+                                className="w-full bg-[#e67e22] hover:bg-orange-600 focus:ring-2 focus:ring-[#e67e22] disabled:opacity-50 disabled:bg-slate-300 dark:disabled:bg-slate-800 outline-none text-white font-semibold py-2.5 rounded-xl shadow-sm transition-colors flex items-center justify-center gap-2 text-sm"
+                              >
+                                Confirm Time
+                                <ChevronRight className="w-4 h-4" />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {msg.type === 'options' && (
+                        <div className="space-y-2 w-full max-w-[340px]">
+                          {msg.content && (
+                            <div className="px-4 py-2.5 rounded-[18px] text-[15px] leading-relaxed w-fit shadow-sm border bg-white dark:bg-[#1e2022] border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 rounded-tl-sm">
+                              {msg.content}
+                            </div>
+                          )}
+                          <div className={cn("inline-flex flex-col gap-2 min-w-[200px] w-full", msg.options?.[0]?.icon ? "" : "")}>
+                            {msg.options?.map(opt => (
+                              <button
+                                key={opt.value}
+                                onClick={() => handleOptionSelect(opt.value, opt.label)}
+                                className={cn(
+                                  "text-left p-3 rounded-xl border border-orange-200 dark:border-orange-500/30 bg-orange-50/50 hover:bg-orange-100 dark:bg-orange-500/10 dark:hover:bg-orange-500/20 text-orange-900 dark:text-orange-100 shadow-sm transition-all focus:ring-2 focus:ring-[#e67e22] outline-none",
+                                  opt.icon && "flex items-center gap-3 p-3 bg-white dark:bg-[#1e2022] hover:border-[#e67e22] border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200"
+                                )}
+                              >
+                                {opt.icon && (
+                                  <div className="p-2 rounded-lg bg-orange-50 dark:bg-orange-500/10 text-[#e67e22]">
+                                    <opt.icon className="w-5 h-5" />
+                                  </div>
+                                )}
+                                <div>
+                                  <div className="font-semibold text-sm">{opt.label}</div>
+                                  {opt.desc && <div className="text-[11px] opacity-70 leading-tight mt-0.5">{opt.desc}</div>}
+                                </div>
+                              </button>
+                            ))}
                           </div>
                         </div>
-                      </div>
+                      )}
 
-                      <div className="pt-2">
-                        <button 
-                          onClick={() => window.print()}
-                          className="w-full bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 dark:text-slate-900 text-white font-semibold py-3 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 group"
-                        >
-                          Save & Book Consultation
-                          <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-                        </button>
-                      </div>
+                      {msg.type === 'services' && (
+                        <div className="space-y-2 w-full max-w-[340px]">
+                           <div className="px-4 py-2.5 rounded-[18px] text-[15px] leading-relaxed w-fit shadow-sm border bg-white dark:bg-[#1e2022] border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 rounded-tl-sm">
+                              {msg.content}
+                           </div>
+                           <div className="bg-white dark:bg-[#1e2022] border border-slate-200 dark:border-slate-800 rounded-2xl p-3 space-y-2 shadow-sm w-full">
+                             <div className="space-y-1.5 max-h-[160px] overflow-y-auto custom-scrollbar pr-1">
+                               {SERVICE_OPTIONS.map(item => (
+                                 <button
+                                   key={item}
+                                   onClick={() => toggleTempService(item)}
+                                   className={cn(
+                                     "w-full text-left px-3 py-2.5 rounded-xl text-sm font-medium border transition-colors flex justify-between items-center group",
+                                     tempServices.includes(item)
+                                       ? "bg-orange-50 border-orange-200 text-[#e67e22] dark:bg-orange-900/20 dark:border-orange-500/30"
+                                       : "bg-slate-50 border-slate-200 dark:bg-[#17191b] dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-slate-300 dark:hover:border-slate-700"
+                                   )}
+                                 >
+                                   <span className="truncate pr-2">{item}</span>
+                                   <div className={cn(
+                                      "w-4 h-4 rounded-full border flex items-center justify-center transition-colors shrink-0",
+                                      tempServices.includes(item)
+                                        ? "bg-[#e67e22] border-[#e67e22]"
+                                        : "border-slate-300 dark:border-slate-600 group-hover:border-slate-400"
+                                    )}>
+                                      {tempServices.includes(item) && <CheckCircle2 className="w-3 h-3 text-white" />}
+                                    </div>
+                                 </button>
+                               ))}
+                             </div>
+                             <div className="pt-2 border-t border-slate-100 dark:border-slate-800/50 mt-2">
+                               <button
+                                 onClick={confirmServices}
+                                 className="w-full bg-[#e67e22] hover:bg-orange-600 focus:ring-2 focus:ring-[#e67e22] outline-none text-white font-semibold py-2.5 rounded-xl shadow-sm transition-colors flex items-center justify-center gap-2 text-sm"
+                               >
+                                 Continue
+                                 <ChevronRight className="w-4 h-4" />
+                               </button>
+                             </div>
+                           </div>
+                        </div>
+                      )}
+
+                      {msg.type === 'estimate' && (
+                        <div className="w-[340px] bg-white dark:bg-[#1e2022] border border-slate-200 dark:border-slate-800 rounded-[20px] rounded-tl-sm shadow-xl overflow-hidden flex flex-col mt-2 hover:shadow-2xl transition-shadow duration-300">
+                          <div className="bg-green-50 dark:bg-green-900/10 px-4 py-3 border-b border-green-100 dark:border-green-800/20 flex flex-col justify-center items-center text-center gap-1.5 relative overflow-hidden">
+                             <div className="absolute top-0 right-0 w-32 h-32 bg-green-500/5 rounded-full blur-2xl -mr-16 -mt-16"></div>
+                             <div className="bg-white dark:bg-green-900/30 p-2 rounded-full shadow-sm mb-1 z-10">
+                               <ShieldCheck className="w-6 h-6 text-green-500" />
+                             </div>
+                             <span className="font-extrabold text-green-800 dark:text-green-400 text-sm z-10 w-full truncate">Your AI Project Scope</span>
+                          </div>
+                          
+                          <div className="p-4 space-y-4">
+                            <div className="space-y-2">
+                              {msg.content?.breakdown?.map((item: any, i: number) => (
+                                <div key={i} className="flex justify-between items-center text-sm py-1.5 border-b border-slate-100 dark:border-slate-800/50 last:border-0 grow">
+                                  <span className="text-slate-600 dark:text-slate-400 w-1/2 pr-2 leading-tight">{item.category}</span>
+                                  <span className="font-semibold text-slate-900 dark:text-slate-200 text-right w-1/2 xs">{item.estimated_cost}</span>
+                                </div>
+                              ))}
+                            </div>
+                            
+                            <div className="bg-slate-50 dark:bg-slate-900/50 p-3 rounded-xl border border-slate-200 dark:border-slate-800 flex flex-col gap-1 items-center text-center mt-2 shadow-inner">
+                              <span className="font-bold text-slate-800 dark:text-slate-300 text-xs uppercase tracking-widest">Total Budget Range</span>
+                              <span className="text-2xl font-black text-[#e67e22]">{msg.content?.totalRange}</span>
+                            </div>
+                            
+                            <div className="text-[10px] text-slate-400 leading-tight text-center px-2">
+                              * {msg.content?.disclaimer}
+                            </div>
+                          </div>
+                          
+                          <div className="p-3 pt-0 mt-auto">
+                            <button 
+                              onClick={() => window.print()}
+                              className="w-full bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 dark:text-slate-900 text-white p-3 font-bold rounded-xl shadow-lg transition-transform hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-2 text-sm"
+                            >
+                               Book Consultation
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
-                  )}
-
-                </motion.div>
+                  </motion.div>
+                ))}
+                
+                <div className="h-4 w-full shrink-0"></div>
               </AnimatePresence>
+            </div>
+
+            {/* Input Bar */}
+            <div className="p-3 bg-white dark:bg-[#1a1c1e] border-t border-slate-200 dark:border-slate-800 shrink-0 relative flex-col">
+              <form 
+                onSubmit={handleSendText}
+                className={cn(
+                  "relative flex items-end gap-2 transition-opacity duration-300",
+                  !isTextInput || isLoading ? "opacity-30 pointer-events-none" : "opacity-100"
+                )}
+              >
+                {currentField === 'layoutDescription' ? (
+                  <textarea
+                    value={inputValue}
+                    onChange={e => setInputValue(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        handleSendText();
+                      }
+                    }}
+                    placeholder="Describe your layout..."
+                    disabled={!isTextInput || isLoading}
+                    className="flex-1 bg-slate-50 hover:bg-white focus:bg-white dark:bg-[#25282a] border border-slate-200 dark:border-slate-800 rounded-[18px] px-4 py-3 outline-none focus:ring-2 focus:ring-[#e67e22]/30 focus:border-[#e67e22] text-[15px] resize-none h-[80px] custom-scrollbar transition-all"
+                  />
+                ) : (
+                  <input
+                    type={currentField === 'email' ? 'email' : currentField === 'phone' ? 'tel' : currentField === 'sqft' ? 'number' : 'text'}
+                    value={inputValue}
+                    onChange={e => setInputValue(e.target.value)}
+                    placeholder="Type your response..."
+                    disabled={!isTextInput || isLoading}
+                    className="flex-1 bg-slate-50 hover:bg-white focus:bg-white dark:bg-[#25282a] border border-slate-200 dark:border-slate-800 rounded-full px-4 py-3 outline-none focus:ring-2 focus:ring-[#e67e22]/30 focus:border-[#e67e22] text-[15px] h-[48px] transition-all"
+                  />
+                )}
+                
+                <button 
+                  type="submit"
+                  disabled={!inputValue.trim() || !isTextInput || isLoading}
+                  className="w-[48px] h-[48px] shrink-0 bg-[#e67e22] hover:bg-orange-600 disabled:bg-slate-200 dark:disabled:bg-slate-800 text-white rounded-full flex items-center justify-center transition-colors shadow-sm"
+                >
+                  <Send className="w-5 h-5 ml-0.5" />
+                </button>
+              </form>
             </div>
             
           </motion.div>
         )}
       </AnimatePresence>
-    </div>
+    </>
   );
 }
